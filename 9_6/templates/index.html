@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Flask-SocketIO 聊天</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            height: 90vh;
+        }
+        
+        #login-container {
+            text-align: center;
+            margin-top: 100px;
+        }
+        
+        #chat-container {
+            display: none;
+            flex-direction: row;
+            flex: 1;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+            overflow: hidden;
+        }
+        
+        #sidebar {
+            width: 250px;
+            background-color: #f5f5f5;
+            padding: 10px;
+            border-right: 1px solid #ccc;
+            display: flex;
+            flex-direction: column;
+        }
+        
+        #chat-area {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+        }
+        
+        #messages {
+            flex: 1;
+            padding: 10px;
+            overflow-y: auto;
+        }
+        
+        #input-area {
+            display: flex;
+            padding: 10px;
+            border-top: 1px solid #ccc;
+        }
+        
+        #message-input {
+            flex: 1;
+            padding: 8px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            margin-right: 10px;
+        }
+        
+        button {
+            padding: 8px 16px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        
+        button:hover {
+            background-color: #45a049;
+        }
+        
+        .message {
+            margin: 5px 0;
+            padding: 8px;
+            border-radius: 4px;
+        }
+        
+        .system {
+            background-color: #e3f2fd;
+            color: #0d47a1;
+        }
+        
+        .user-message {
+            background-color: #f1f8e9;
+            color: #2e7d32;
+        }
+        
+        .room-controls {
+            margin-bottom: 15px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid #ccc;
+        }
+        
+        .room-item {
+            padding: 5px;
+            margin: 3px 0;
+            border-radius: 3px;
+            cursor: pointer;
+        }
+        
+        .room-item:hover {
+            background-color: #e0e0e0;
+        }
+        
+        .room-item.active {
+            background-color: #bbdefb;
+            font-weight: bold;
+        }
+        
+        #user-list {
+            margin-top: 15px;
+        }
+        
+        .user-item {
+            padding: 3px 0;
+        }
+    </style>
+</head>
+<body>
+    <!-- 登录界面 -->
+    <div id="login-container">
+        <h1>聊天应用</h1>
+        <input type="text" id="username-input" placeholder="请输入用户名">
+        <button id="login-button">登录</button>
+    </div>
+
+    <!-- 聊天界面 -->
+    <div id="chat-container">
+        <!-- 侧边栏 -->
+        <div id="sidebar">
+            <div class="room-controls">
+                <h3>房间</h3>
+                <input type="text" id="room-name-input" placeholder="房间名称">
+                <button id="create-room-button">创建房间</button>
+                <div id="room-list">
+                    <div class="room-item active" data-room-id="general">公共聊天</div>
+                </div>
+            </div>
+            
+            <div id="user-list">
+                <h3>在线用户</h3>
+                <div id="users"></div>
+            </div>
+        </div>
+        
+        <!-- 聊天区域 -->
+        <div id="chat-area">
+            <div id="messages"></div>
+            <div id="input-area">
+                <input type="text" id="message-input" placeholder="输入消息...">
+                <button id="send-button">发送</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // 连接到SocketIO服务器
+        const socket = io.connect('http://' + document.domain + ':' + location.port);
+        
+        // 全局变量
+        let username = '';
+        let currentRoom = 'general';
+        
+        // DOM元素
+        const loginContainer = document.getElementById('login-container');
+        const chatContainer = document.getElementById('chat-container');
+        const usernameInput = document.getElementById('username-input');
+        const loginButton = document.getElementById('login-button');
+        const messageInput = document.getElementById('message-input');
+        const sendButton = document.getElementById('send-button');
+        const messagesDiv = document.getElementById('messages');
+        const userListDiv = document.getElementById('users');
+        const roomListDiv = document.getElementById('room-list');
+        const createRoomButton = document.getElementById('create-room-button');
+        const roomNameInput = document.getElementById('room-name-input');
+        
+        // 登录处理
+        loginButton.addEventListener('click', () => {
+            const inputUsername = usernameInput.value.trim();
+            if (inputUsername) {
+                socket.emit('login', { username: inputUsername });
+            }
+        });
+        
+        usernameInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                loginButton.click();
+            }
+        });
+        
+        // 发送消息
+        sendButton.addEventListener('click', sendMessage);
+        messageInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                sendMessage();
+            }
+        });
+        
+        function sendMessage() {
+            const message = messageInput.value.trim();
+            if (message && username) {
+                socket.emit('send_message', {
+                    username: username,
+                    message: message,
+                    room: currentRoom,
+                    timestamp: new Date().toLocaleTimeString()
+                });
+                messageInput.value = '';
+            }
+        }
+        
+        // 创建房间
+        createRoomButton.addEventListener('click', () => {
+            const roomName = roomNameInput.value.trim();
+            if (roomName) {
+                socket.emit('create_room', {
+                    room_name: roomName,
+                    username: username
+                });
+                roomNameInput.value = '';
+            }
+        });
+        
+        // 加入房间
+        roomListDiv.addEventListener('click', (e) => {
+            if (e.target.classList.contains('room-item')) {
+                const roomId = e.target.getAttribute('data-room-id');
+                if (roomId && roomId !== currentRoom) {
+                    socket.emit('join_room', {
+                        room_id: roomId,
+                        username: username
+                    });
+                    
+                    // 更新UI
+                    document.querySelectorAll('.room-item').forEach(item => {
+                        item.classList.remove('active');
+                    });
+                    e.target.classList.add('active');
+                    currentRoom = roomId;
+                    
+                    // 清空消息区域
+                    messagesDiv.innerHTML = '';
+                    addSystemMessage(`已切换到房间: ${e.target.textContent}`);
+                }
+            }
+        });
+        
+        // 添加系统消息
+        function addSystemMessage(message) {
+            const div = document.createElement('div');
+            div.className = 'message system';
+            div.textContent = `[系统] ${message}`;
+            messagesDiv.appendChild(div);
+            scrollToBottom();
+        }
+        
+        // 添加用户消息
+        function addUserMessage(username, message, isCurrentUser = false) {
+            const div = document.createElement('div');
+            div.className = `message user-message ${isCurrentUser ? 'current-user' : ''}`;
+            div.innerHTML = `<strong>${username}</strong>: ${message}`;
+            messagesDiv.appendChild(div);
+            scrollToBottom();
+        }
+        
+        // 滚动到底部
+        function scrollToBottom() {
+            messagesDiv.scrollTop = messagesDiv.scrollHeight;
+        }
+        
+        // 更新在线用户列表
+        function updateUserList(users) {
+            userListDiv.innerHTML = '';
+            users.forEach(user => {
+                const div = document.createElement('div');
+                div.className = 'user-item';
+                div.textContent = user;
+                if (user === username) {
+                    div.textContent += ' (你)';
+                    div.style.fontWeight = 'bold';
+                }
+                userListDiv.appendChild(div);
+            });
+        }
+        
+        // 更新房间列表
+        function updateRoomList(roomsData) {
+            // 保留公共房间
+            const generalRoom = document.querySelector('.room-item[data-room-id="general"]');
+            roomListDiv.innerHTML = '';
+            if (generalRoom) {
+                roomListDiv.appendChild(generalRoom);
+            }
+            
+            // 添加其他房间
+            for (const [roomId, roomInfo] of Object.entries(roomsData)) {
+                if (roomId !== 'general') {
+                    const div = document.createElement('div');
+                    div.className = `room-item ${roomId === currentRoom ? 'active' : ''}`;
+                    div.setAttribute('data-room-id', roomId);
+                    div.textContent = roomInfo.name;
+                    roomListDiv.appendChild(div);
+                }
+            }
+        }
+        
+        // SocketIO事件处理
+        socket.on('connection_response', (data) => {
+            addSystemMessage(data.message);
+        });
+        
+        socket.on('login_response', (data) => {
+            if (data.success) {
+                username = data.username;
+                loginContainer.style.display = 'none';
+                chatContainer.style.display = 'flex';
+                addSystemMessage(data.message);
+                updateUserList(data.online_users);
+            } else {
+                alert(data.message);
+            }
+        });
+        
+        socket.on('new_message', (data) => {
+            const isCurrentUser = data.username === username;
+            addUserMessage(data.username, data.message, isCurrentUser);
+        });
+        
+        socket.on('user_joined', (data) => {
+            addSystemMessage(`${data.username} 加入了聊天`);
+            updateUserList(data.online_users);
+        });
+        
+        socket.on('user_left', (data) => {
+            addSystemMessage(`${data.username} 离开了聊天`);
+            updateUserList(data.online_users);
+        });
+        
+        socket.on('room_response', (data) => {
+            if (data.success) {
+                addSystemMessage(data.message);
+                updateRoomList(rooms);
+            } else {
+                alert(data.message);
+            }
+        });
+        
+        socket.on('room_created', (data) => {
+            addSystemMessage(`${data.creator} 创建了房间: ${data.room_name}`);
+            // 更新房间列表
+            const div = document.createElement('div');
+            div.className = 'room-item';
+            div.setAttribute('data-room-id', data.room_id);
+            div.textContent = data.room_name;
+            roomListDiv.appendChild(div);
+        });
+        
+        socket.on('user_joined_room', (data) => {
+            if (currentRoom === data.room_id) {
+                addSystemMessage(`${data.username} 加入了房间`);
+            }
+        });
+        
+        socket.on('user_left_room', (data) => {
+            if (currentRoom === data.room_id) {
+                addSystemMessage(`${data.username} 离开了房间`);
+            }
+        });
+    </script>
+</body>
+</html>
+    
